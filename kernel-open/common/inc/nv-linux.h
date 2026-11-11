@@ -954,6 +954,7 @@ typedef struct nv_alloc_s {
     struct sg_table *import_sgt;
     dma_addr_t     dma_handle;          /* dma handle used by dma_alloc_coherent(), dma_free_coherent() */
     nv_linux_mm_free_work_t *accounting_mm_work;
+    nv_kthread_q_item_t deferred_free_q_item; /* local change: NVreg_RmLockRelief bit 1 */
 } nv_alloc_t;
 
 /**
@@ -1691,6 +1692,7 @@ static inline NV_STATUS nv_check_gpu_state(nv_state_t *nv)
 }
 
 extern NvU32 NVreg_EnableNUMA;
+extern NvU32 NVreg_RmLockRelief;
 extern NvU32 NVreg_OsEnableCxlSupport;
 extern NvU32 NVreg_RegisterPCIDriver;
 extern NvU32 NVreg_RegisterPlatformDeviceDriver;

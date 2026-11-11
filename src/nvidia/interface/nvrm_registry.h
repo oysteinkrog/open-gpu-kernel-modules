@@ -2363,6 +2363,21 @@
 //
 #define NV_REG_STR_RM_CLIENT_LIST_DEFERRED_FREE_LIMIT      "RMClientListDeferredFreeLimit"
 
+//
+// Type: DWORD
+//
+// Local change (oysteinkrog fork). Mirrors the Linux module parameter
+// NVreg_RmLockRelief; see kernel-open/nvidia/nv-reg.h. 0 gives stock behaviour.
+//   Bit 0: free a closed fd's clients through the deferred client free
+//          (unless RMClientListDeferredFree is set explicitly) and let that
+//          free release the locks after a time slice when other threads wait.
+//   Bit 1: handled in kernel-open (deferred release of uncached sysmem pages).
+//
+#define NV_REG_STR_RM_LOCK_RELIEF                          "RmLockRelief"
+#define NV_REG_STR_RM_LOCK_RELIEF_SLICED_CLIENT_FREE       0x00000001
+#define NV_REG_STR_RM_LOCK_RELIEF_DEFERRED_PAGE_FREE       0x00000002
+#define NV_REG_STR_RM_LOCK_RELIEF_SLICE_NS                 (4ULL * 1000 * 1000)
+
 #define NV_REG_STR_RM_MIG_OVERRIDE_SWIZZID_TO_ZERO               "RMInternalMIGOverrideSwizzIdToZero"
 #define NV_REG_STR_RM_MIG_OVERRIDE_SWIZZID_TO_ZERO_DISABLED       0x00000000
 #define NV_REG_STR_RM_MIG_OVERRIDE_SWIZZID_TO_ZERO_ENABLED        0x00000001

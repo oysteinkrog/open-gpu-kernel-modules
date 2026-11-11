@@ -46,6 +46,7 @@ typedef struct
     LOCK_TRACE_INFO     traceInfo;
     NvU64               tlsEntryId;
     PORT_ATOMIC NvU32   contentionCount;
+    PORT_ATOMIC NvU32   readWaitCount;      // threads in a blocking READ acquire (local change)
     NvU32               lowPriorityAging;
     PORT_ATOMIC NvU64   totalWaitTime;
     PORT_ATOMIC NvU64   totalRwHoldTime;
@@ -56,6 +57,9 @@ RsServer          g_resServ;
 static RM_API     g_RmApiList[RMAPI_TYPE_MAX];
 static NvBool     g_bResServInit = NV_FALSE;
 static RMAPI_LOCK g_RmApiLock;
+
+// Local change: value of NVreg_RmLockRelief (NV_REG_STR_RM_LOCK_RELIEF).
+static NvU32      g_rmLockRelief;
 
 static NvU64 g_rtd3PmPathThreadId = ~0ULL;
 
@@ -616,7 +620,9 @@ rmapiLockAcquire(NvU32 flags, NvU32 module)
     {
         if ((flags & RMAPI_LOCK_FLAGS_READ))
         {
+            portAtomicIncrementU32(&g_RmApiLock.readWaitCount);
             portSyncRwLockAcquireRead(g_RmApiLock.pLock);
+            portAtomicDecrementU32(&g_RmApiLock.readWaitCount);
         }
         else
         {
@@ -760,6 +766,31 @@ NvBool
 rmapiLockIsOwner(void)
 {
     return tlsEntryGet(g_RmApiLock.tlsEntryId) != 0;
+}
+
+void
+rmapiSetLockRelief(NvU32 relief)
+{
+    g_rmLockRelief = relief;
+}
+
+NvU32
+rmapiGetLockRelief(void)
+{
+    return g_rmLockRelief;
+}
+
+//
+// Local change: report whether another thread is waiting in a blocking
+// rmapiLockAcquire() (READ, or WRITE without LOW_PRIORITY). The answer is a
+// hint only: it can change right after it is read. Used to decide when a long
+// free of a disabled client should release the locks for a moment.
+//
+NvBool
+rmapiLockIsContended(void)
+{
+    return (g_RmApiLock.contentionCount != 0) ||
+           (g_RmApiLock.readWaitCount != 0);
 }
 
 NvBool

@@ -170,6 +170,7 @@ struct RS_RES_FREE_PARAMS_INTERNAL
     // Internal use only
     NvBool             bHiPriOnly;      ///< [in] Only free if this is a high priority resources
     NvBool             bDisableOnly;    ///< [in] Disable the target instead of freeing it (only applies to clients)
+    NvBool             bAllowSliceRelease; ///< [in] Local change: a free of a disabled client may stop early, see serverFreeResourceTree
     RS_LOCK_INFO      *pLockInfo;       ///< [inout] Locking flags and state
     NvU32              freeFlags;       ///< [in] Flags for the free operation
     NvU32              freeState;       ///< [inout] Free state

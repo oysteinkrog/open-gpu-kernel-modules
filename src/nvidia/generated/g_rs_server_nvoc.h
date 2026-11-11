@@ -774,6 +774,16 @@ extern NV_STATUS serverAllocResourceUnderLock(RsServer *pServer, RS_RES_ALLOC_PA
 extern NV_STATUS serverFreeResourceRpcUnderLock(RsServer *pServer, RS_RES_FREE_PARAMS *pFreeParams);
 
 /**
+ * Local change: decide whether a free of a disabled client that took its own
+ * top and client locks at sliceStartNs should stop now, release the locks and
+ * let serverFreeDisabledClients continue it later. User-implemented.
+ *
+ * @param[in]    pServer This server instance
+ * @param[in]    sliceStartNs osGetMonotonicTimeNs() when the locks were taken
+ */
+extern NvBool serverFreeResourceTreeShouldRelease(RsServer *pServer, NvU64 sliceStartNs);
+
+/**
  * Copy-in parameters supplied by caller, and initialize API state. User-implemented.
  * @param[in]   pServer
  * @param[in]   pAllocParams    Resource allocation parameters
