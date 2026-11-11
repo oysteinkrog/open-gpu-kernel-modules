@@ -437,10 +437,19 @@ _sysRegistryOverrideResourceServer
         pSys->setProperty(pSys, PDB_PROP_SYS_RM_LOCK_TIME_COLLECT, !!data32);
     }
 
+    // Local change: NVreg_RmLockRelief, see NV_REG_STR_RM_LOCK_RELIEF.
+    if (osReadRegistryDword(pGpu, NV_REG_STR_RM_LOCK_RELIEF, &data32) != NV_OK)
+        data32 = 0;
+    rmapiSetLockRelief(data32);
+
     if (osReadRegistryDword(pGpu, NV_REG_STR_RM_CLIENT_LIST_DEFERRED_FREE,
                             &data32) == NV_OK)
     {
         pSys->bUseDeferredClientListFree = !!data32;
+    }
+    else if (rmapiGetLockRelief() & NV_REG_STR_RM_LOCK_RELIEF_SLICED_CLIENT_FREE)
+    {
+        pSys->bUseDeferredClientListFree = NV_TRUE;
     }
 
     if (osReadRegistryDword(pGpu, NV_REG_STR_RM_CLIENT_LIST_DEFERRED_FREE_LIMIT,

@@ -23,6 +23,8 @@
 
 #include "rmapi/rmapi.h"
 #include "rmapi/rmapi_specific.h"
+#include "nvrm_registry.h"
+#include "os/os.h"
 #include "rmapi/client.h"
 #include "entry_points.h"
 #include "core/locks.h"
@@ -1661,6 +1663,28 @@ rmapiDisableClientsWithSecInfoTls
     threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
 
     return status;
+}
+
+//
+// Local change (NVreg_RmLockRelief bit 0): called by serverFreeResourceTree
+// between objects while it frees a disabled client. Stop once the slice has
+// lasted NV_REG_STR_RM_LOCK_RELIEF_SLICE_NS and another thread is blocked on
+// the API lock.
+//
+NvBool
+serverFreeResourceTreeShouldRelease
+(
+    RsServer *pServer,
+    NvU64     sliceStartNs
+)
+{
+    if (!(rmapiGetLockRelief() & NV_REG_STR_RM_LOCK_RELIEF_SLICED_CLIENT_FREE))
+        return NV_FALSE;
+
+    if ((osGetMonotonicTimeNs() - sliceStartNs) < NV_REG_STR_RM_LOCK_RELIEF_SLICE_NS)
+        return NV_FALSE;
+
+    return rmapiLockIsContended();
 }
 
 NvBool

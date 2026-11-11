@@ -180,6 +180,14 @@ extern NvU32 nv_dma_remap_peer_mmio;
 nv_kthread_q_t nv_kthread_q;
 nv_kthread_q_t nv_deferred_close_kthread_q;
 
+/*
+ * Local change (NVreg_RmLockRelief bit 1): worker that returns uncached and
+ * write-combined system memory to the kernel after RM has released it, so the
+ * page attribute change (set_pages_array_wb, a TLB flush on every CPU) does
+ * not run while the caller holds the RM API lock.
+ */
+static nv_kthread_q_t nv_deferred_free_kthread_q;
+
 struct rw_semaphore nv_system_pm_lock;
 
 #if defined(CONFIG_PM)
@@ -567,6 +575,10 @@ nv_module_state_exit(nv_stack_t *sp)
 {
     nv_state_t *nv = NV_STATE_PTR(&nv_ctl_device);
 
+    // Runs every pending deferred page free; later frees fall back to the
+    // synchronous path because scheduling on a stopped queue fails. Must stop
+    // before nv_destroy_page_pools().
+    nv_kthread_q_stop(&nv_deferred_free_kthread_q);
     nv_kthread_q_stop(&nv_deferred_close_kthread_q);
     nv_kthread_q_stop(&nv_kthread_q);
 
@@ -603,6 +615,14 @@ nv_module_state_init(nv_stack_t *sp)
     rc = nv_kthread_q_init(&nv_deferred_close_kthread_q, "nv_queue");
     if (rc != 0)
     {
+        nv_kthread_q_stop(&nv_kthread_q);
+        goto exit;
+    }
+
+    rc = nv_kthread_q_init(&nv_deferred_free_kthread_q, "nv_free_q");
+    if (rc != 0)
+    {
+        nv_kthread_q_stop(&nv_deferred_close_kthread_q);
         nv_kthread_q_stop(&nv_kthread_q);
         goto exit;
     }
@@ -4140,6 +4160,49 @@ failed:
     return status;
 }
 
+/*
+ * Local change (NVreg_RmLockRelief bit 1): see nv_deferred_free_kthread_q.
+ * The allocation is no longer referenced by RM or by any user mapping when
+ * this runs (its usage count already reached zero), the same state in which
+ * nvidia_close() frees allocations that outlived their RM object.
+ */
+static void nv_deferred_free_pages_callback(void *args)
+{
+    nv_alloc_t *at = args;
+
+    if (at->flags.contig)
+        nv_free_contig_pages(at);
+    else
+        nv_free_system_pages(at);
+
+    nvos_free_alloc(at);
+}
+
+static NvBool nv_defer_free_pages(nv_alloc_t *at)
+{
+    if (!(NVreg_RmLockRelief & NV_RM_LOCK_RELIEF_DEFERRED_PAGE_FREE))
+        return NV_FALSE;
+
+    // Only allocations whose free changes the page attributes back to WB.
+    if (at->cache_type == NV_MEMORY_CACHED)
+        return NV_FALSE;
+
+    if (at->flags.guest || at->import_sgt || at->flags.coherent ||
+        at->flags.carveout || at->flags.peer_io || at->flags.physical ||
+        at->flags.user || at->flags.aliased)
+        return NV_FALSE;
+
+    if (!NV_MAY_SLEEP())
+        return NV_FALSE;
+
+    nv_kthread_q_item_init(&at->deferred_free_q_item,
+                           nv_deferred_free_pages_callback, at);
+
+    // Fails while the module is loading or unloading; free inline then.
+    return nv_kthread_q_schedule_q_item(&nv_deferred_free_kthread_q,
+                                        &at->deferred_free_q_item) != 0;
+}
+
 NV_STATUS NV_API_CALL nv_free_pages(
     nv_state_t *nv,
     NvU32 page_count,
@@ -4166,6 +4229,9 @@ NV_STATUS NV_API_CALL nv_free_pages(
      */
     if (!atomic64_dec_and_test(&at->usage_count))
         return NV_OK;
+
+    if (nv_defer_free_pages(at))
+        return rmStatus;
 
     if (!at->flags.guest && !at->import_sgt)
     {

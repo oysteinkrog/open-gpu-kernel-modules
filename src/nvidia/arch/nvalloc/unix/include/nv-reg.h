@@ -1040,6 +1040,36 @@
 #define NV_GPU_INIT_ON_PROBE_AUTO      2
 #define NV_GPU_INIT_ON_PROBE_DEFAULT NV_GPU_INIT_ON_PROBE_AUTO
 
+/*
+ * Option: NVreg_RmLockRelief
+ *
+ * Description:
+ *
+ * Local change (oysteinkrog fork, not from NVIDIA). Bit mask of changes that
+ * shorten how long one process holds the global RM API lock while it frees
+ * GPU objects, so other clients (for example the compositor through
+ * nvidia-modeset) do not stall behind it. 0 gives the stock behaviour.
+ *
+ *  Bit 0: free the RM clients of a closed file descriptor through the
+ *         existing deferred client free (as RMClientListDeferredFree=1), and
+ *         let that free stop after NV_RM_LOCK_RELIEF_SLICE_US of work when
+ *         another thread waits for the API lock, release the locks and
+ *         continue later. Applies only to clients that are already disabled.
+ *         An explicit RMClientListDeferredFree registry value still wins.
+ *  Bit 1: return uncached or write-combined system memory pages to the
+ *         kernel from a worker thread, after RM has released them, instead
+ *         of inside the RM locks. Restoring the write-back page attribute
+ *         flushes TLBs on every CPU and took 45 to 73 ms per process exit.
+ *
+ * Default: 0x3.
+ */
+#define __NV_RM_LOCK_RELIEF RmLockRelief
+#define NV_REG_RM_LOCK_RELIEF NV_REG_STRING(__NV_RM_LOCK_RELIEF)
+#define NV_RM_LOCK_RELIEF_SLICED_CLIENT_FREE   0x00000001
+#define NV_RM_LOCK_RELIEF_DEFERRED_PAGE_FREE   0x00000002
+#define NV_RM_LOCK_RELIEF_DEFAULT              0x00000003
+#define NV_RM_LOCK_RELIEF_SLICE_US             4000
+
 #if defined(NV_DEFINE_REGISTRY_KEY_TABLE)
 
 /*
@@ -1100,6 +1130,7 @@ NV_DEFINE_REG_ENTRY_GLOBAL(__NV_ENABLE_SYSTEM_MEMORY_POOLS, NV_ENABLE_SYSTEM_MEM
 NV_DEFINE_REG_ENTRY_GLOBAL(__NV_OS_ENABLE_CXL_SUPPORT, 1);
 NV_DEFINE_REG_ENTRY_GLOBAL(__NV_USE_KERNEL_SUSPEND_NOTIFIERS, 1);
 NV_DEFINE_REG_ENTRY(__NV_ENABLE_NON_PREEMTABLE_DEBUGGER_SESSION, 0);
+NV_DEFINE_REG_ENTRY_GLOBAL(__NV_RM_LOCK_RELIEF, NV_RM_LOCK_RELIEF_DEFAULT);
 /*
  *----------------registry database definition----------------------
  */
@@ -1152,6 +1183,7 @@ nv_parm_t nv_parms[] = {
     NV_DEFINE_PARAMS_TABLE_ENTRY(__NV_OS_ENABLE_CXL_SUPPORT),
     NV_DEFINE_PARAMS_TABLE_ENTRY(__NV_ENABLE_NON_PREEMTABLE_DEBUGGER_SESSION),
     NV_DEFINE_PARAMS_TABLE_ENTRY(__NV_GPU_INIT_ON_PROBE),
+    NV_DEFINE_PARAMS_TABLE_ENTRY(__NV_RM_LOCK_RELIEF),
     {NULL, NULL}
 };
 

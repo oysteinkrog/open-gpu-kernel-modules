@@ -107,6 +107,18 @@ NvBool rmapiLockIsOwner(void);
 NvBool rmapiLockIsWriteOwner(void);
 
 /**
+ * Local change: NV_TRUE if another thread is blocked waiting for the API lock.
+ * A hint only; it may change as soon as it is read.
+ */
+NvBool rmapiLockIsContended(void);
+
+/**
+ * Local change: NVreg_RmLockRelief bits (NV_REG_STR_RM_LOCK_RELIEF_*).
+ */
+void  rmapiSetLockRelief(NvU32 relief);
+NvU32 rmapiGetLockRelief(void);
+
+/**
  * Retrieve total RM API lock wait and hold times
  */
 void rmapiLockGetTimes(NV0000_CTRL_SYSTEM_GET_LOCK_TIMES_PARAMS *);

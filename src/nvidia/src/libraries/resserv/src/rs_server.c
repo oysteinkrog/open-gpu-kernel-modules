@@ -301,6 +301,11 @@ NV_STATUS serverFreeResourceRpcUnderLock(RsServer *pServer, RS_RES_FREE_PARAMS *
 {
     return NV_OK;
 }
+
+NvBool serverFreeResourceTreeShouldRelease(RsServer *pServer, NvU64 sliceStartNs)
+{
+    return NV_FALSE;
+}
 #endif
 
 
@@ -1086,6 +1091,11 @@ NV_STATUS serverFreeDisabledClients
     params.pLockInfo      = &lockInfo;
     params.pSecInfo       = &secInfo;
 
+    // Local change: each call below takes its own locks only when the caller
+    // does not hold the top lock; only then may it stop early (see
+    // serverFreeResourceTree and NVreg_RmLockRelief).
+    params.bAllowSliceRelease = !(freeState & RS_LOCK_STATE_TOP_LOCK_ACQUIRED);
+
     while ((pClient = _getNextDisabledClient(pServer)))
     {
         NV_ASSERT(pClient->bDisabled);
@@ -1202,6 +1212,8 @@ serverFreeResourceTree
     LOCK_ACCESS_TYPE    topLockAccess;
     LOCK_ACCESS_TYPE    firstTopLockAccess;
     NvBool              bSupportForceROLock;
+    NvBool              bMaySliceRelease = NV_FALSE;
+    NvU64               sliceStartNs = 0;
 
     if (!pServer->bConstructed)
         return NV_ERR_NOT_READY;
@@ -1272,6 +1284,27 @@ serverFreeResourceTree
         freeStack.pPrev = pClient->pFreeStack;
     pClient->pFreeStack = &freeStack;
     bPopFreeStack = NV_TRUE;
+
+    //
+    // Local change (NVreg_RmLockRelief bit 0): a top-level free of a client
+    // that is already disabled (its fd is closed, see serverFreeDisabledClients)
+    // may stop after a time slice when other threads wait for the API lock.
+    // It stops the same way the existing bHiPriOnly pass stops: what is left
+    // stays on the client's pending free list, the locks are released, and
+    // serverFreeDisabledClients calls this function again for the same client.
+    // Only allowed when this call took the top and client locks itself.
+    //
+    if (pParams->bAllowSliceRelease && pClient->bDisabled &&
+        (freeStack.pPrev == NULL) &&
+        !(initialLockState & (RS_LOCK_STATE_TOP_LOCK_ACQUIRED |
+                              RS_LOCK_STATE_CLIENT_LOCK_ACQUIRED)) &&
+        (releaseFlags & RS_LOCK_RELEASE_TOP_LOCK) &&
+        (releaseFlags & RS_LOCK_RELEASE_CLIENT_LOCK) &&
+        !pParams->bDisableOnly && !pParams->bInvalidateOnly)
+    {
+        bMaySliceRelease = NV_TRUE;
+        sliceStartNs = osGetMonotonicTimeNs();
+    }
 
     pParams->pResourceRef = pResourceRef;
     freeStack.pResourceRef = pResourceRef;
@@ -1392,6 +1425,15 @@ serverFreeResourceTree
                     pClient->hClient,
                     hTarget,
                     status);
+        }
+
+        // Local change: see bMaySliceRelease above. At least one object was
+        // freed in this call, so every call makes progress.
+        if (bMaySliceRelease &&
+            serverFreeResourceTreeShouldRelease(pServer, sliceStartNs))
+        {
+            status = NV_WARN_MORE_PROCESSING_REQUIRED;
+            goto done;
         }
     }
 
