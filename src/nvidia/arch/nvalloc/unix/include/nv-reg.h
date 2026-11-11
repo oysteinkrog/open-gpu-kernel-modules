@@ -1050,24 +1050,29 @@
  * GPU objects, so other clients (for example the compositor through
  * nvidia-modeset) do not stall behind it. 0 gives the stock behaviour.
  *
- *  Bit 0: free the RM clients of a closed file descriptor through the
- *         existing deferred client free (as RMClientListDeferredFree=1), and
- *         let that free stop after NV_RM_LOCK_RELIEF_SLICE_US of work when
- *         another thread waits for the API lock, release the locks and
- *         continue later. Applies only to clients that are already disabled.
- *         An explicit RMClientListDeferredFree registry value still wins.
+ *  Bit 0 (opt-in): free the RM clients of a closed file descriptor
+ *         through the existing deferred client free (as
+ *         RMClientListDeferredFree=1), and let that free stop after
+ *         NV_RM_LOCK_RELIEF_SLICE_US of work when another thread waits for
+ *         the API lock, release the locks and continue later. Applies only
+ *         to clients that are already disabled, and not to their
+ *         high-priority pass. An explicit RMClientListDeferredFree registry
+ *         value still wins. Off by default: the deferred client free is an
+ *         NVIDIA option that is off by default and less tested.
  *  Bit 1: return uncached or write-combined system memory pages to the
  *         kernel from a worker thread, after RM has released them, instead
  *         of inside the RM locks. Restoring the write-back page attribute
  *         flushes TLBs on every CPU and took 45 to 73 ms per process exit.
+ *         At most 4096 frees wait; past that they run inline. The queue is
+ *         drained before suspend and at module unload.
  *
- * Default: 0x3.
+ * Default: 0x2.
  */
 #define __NV_RM_LOCK_RELIEF RmLockRelief
 #define NV_REG_RM_LOCK_RELIEF NV_REG_STRING(__NV_RM_LOCK_RELIEF)
 #define NV_RM_LOCK_RELIEF_SLICED_CLIENT_FREE   0x00000001
 #define NV_RM_LOCK_RELIEF_DEFERRED_PAGE_FREE   0x00000002
-#define NV_RM_LOCK_RELIEF_DEFAULT              0x00000003
+#define NV_RM_LOCK_RELIEF_DEFAULT              0x00000002
 #define NV_RM_LOCK_RELIEF_SLICE_US             4000
 
 #if defined(NV_DEFINE_REGISTRY_KEY_TABLE)
