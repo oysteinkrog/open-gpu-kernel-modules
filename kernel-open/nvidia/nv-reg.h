@@ -1074,7 +1074,7 @@
  *         kernel from a worker thread, after RM has released them, instead
  *         of inside the RM locks. Restoring the write-back page attribute
  *         flushes TLBs on every CPU and took 45 to 73 ms per process exit.
- *         At most 4096 frees wait; past that they run inline. The queue is
+ *         At most 256 MiB waits; past that frees run inline. The queue is
  *         drained before suspend and at module unload.
  *
  * Default: 0x2.
