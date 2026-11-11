@@ -1316,9 +1316,12 @@ serverFreeResourceTree
     // It stops the same way the existing bHiPriOnly pass stops: what is left
     // stays on the client's pending free list, the locks are released, and
     // serverFreeDisabledClients calls this function again for the same client.
-    // Only allowed when this call took the top and client locks itself.
+    // Only allowed when this call took the top and client locks itself, and
+    // not in the bHiPriOnly pass, which serverFreeDisabledClients treats as
+    // complete when it returns. The check sits after non-target children
+    // only; the target (the client itself) is always freed in one go.
     //
-    if (pParams->bAllowSliceRelease && pClient->bDisabled &&
+    if (pParams->bAllowSliceRelease && pClient->bDisabled && !bHiPriOnly &&
         (freeStack.pPrev == NULL) &&
         !(initialLockState & (RS_LOCK_STATE_TOP_LOCK_ACQUIRED |
                               RS_LOCK_STATE_CLIENT_LOCK_ACQUIRED)) &&

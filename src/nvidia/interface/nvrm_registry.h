@@ -2368,7 +2368,7 @@
 //
 // Local change (oysteinkrog fork). Mirrors the Linux module parameter
 // NVreg_RmLockRelief; see kernel-open/nvidia/nv-reg.h. 0 gives stock behaviour.
-//   Bit 0: free a closed fd's clients through the deferred client free
+//   Bit 0 (opt-in, default off): free a closed fd's clients through the deferred client free
 //          (unless RMClientListDeferredFree is set explicitly) and let that
 //          free release the locks after a time slice when other threads wait.
 //   Bit 1: handled in kernel-open (deferred release of uncached sysmem pages).

@@ -191,6 +191,9 @@ nv_kthread_q_t nv_deferred_close_kthread_q;
  * not run while the caller holds the RM API lock.
  */
 static nv_kthread_q_t nv_deferred_free_kthread_q;
+static atomic_t       nv_deferred_free_q_ready = ATOMIC_INIT(0);
+static atomic_t       nv_deferred_free_pending = ATOMIC_INIT(0);
+#define NV_DEFERRED_FREE_MAX_PENDING 4096
 
 struct rw_semaphore nv_system_pm_lock;
 
@@ -588,9 +591,10 @@ nv_module_state_exit(nv_stack_t *sp)
 {
     nv_state_t *nv = NV_STATE_PTR(&nv_ctl_device);
 
-    // Runs every pending deferred page free; later frees fall back to the
-    // synchronous path because scheduling on a stopped queue fails. Must stop
-    // before nv_destroy_page_pools().
+    // Close the gate first so later frees (rm_shutdown_rm runs after this)
+    // take the synchronous path, then run every pending deferred page free.
+    // Must happen before nv_destroy_page_pools().
+    atomic_set(&nv_deferred_free_q_ready, 0);
     nv_kthread_q_stop(&nv_deferred_free_kthread_q);
     nv_kthread_q_stop(&nv_deferred_close_kthread_q);
     nv_kthread_q_stop(&nv_kthread_q);
@@ -639,6 +643,7 @@ nv_module_state_init(nv_stack_t *sp)
         nv_kthread_q_stop(&nv_kthread_q);
         goto exit;
     }
+    atomic_set(&nv_deferred_free_q_ready, 1);
 
     nv_linux_devices = NULL;
     bitmap_clear(nv_linux_minor_bitmap, 0, NV_MINOR_DEVICE_NUMBER_REGULAR_MAX + 1);
@@ -4208,7 +4213,16 @@ static void nv_deferred_free_pages_callback(void *args)
     else
         nv_free_system_pages(at);
 
+    // Frees the q_item embedded in at; nv_kthread_q allows that in the callback.
     nvos_free_alloc(at);
+    atomic_dec(&nv_deferred_free_pending);
+}
+
+/* Wait until every deferred page free queued so far has run. */
+static void nv_deferred_free_flush(void)
+{
+    if (atomic_read(&nv_deferred_free_q_ready))
+        nv_kthread_q_flush(&nv_deferred_free_kthread_q);
 }
 
 static NvBool nv_defer_free_pages(nv_alloc_t *at)
@@ -4228,12 +4242,28 @@ static NvBool nv_defer_free_pages(nv_alloc_t *at)
     if (!NV_MAY_SLEEP())
         return NV_FALSE;
 
+    // The queue exists only between nv_module_state_init and _exit.
+    if (!atomic_read(&nv_deferred_free_q_ready))
+        return NV_FALSE;
+
+    // Bound the backlog; past it, free inline as the stock driver does.
+    if (atomic_inc_return(&nv_deferred_free_pending) > NV_DEFERRED_FREE_MAX_PENDING)
+    {
+        atomic_dec(&nv_deferred_free_pending);
+        return NV_FALSE;
+    }
+
     nv_kthread_q_item_init(&at->deferred_free_q_item,
                            nv_deferred_free_pages_callback, at);
 
-    // Fails while the module is loading or unloading; free inline then.
-    return nv_kthread_q_schedule_q_item(&nv_deferred_free_kthread_q,
-                                        &at->deferred_free_q_item) != 0;
+    if (nv_kthread_q_schedule_q_item(&nv_deferred_free_kthread_q,
+                                     &at->deferred_free_q_item) == 0)
+    {
+        atomic_dec(&nv_deferred_free_pending);
+        return NV_FALSE;
+    }
+
+    return NV_TRUE;
 }
 
 NV_STATUS NV_API_CALL nv_free_pages(
@@ -4879,6 +4909,10 @@ nvidia_suspend(
         nvl = dev_get_drvdata(dev);
     }
     nv = NV_STATE_PTR(nvl);
+
+    // Local change: finish deferred page frees (page attribute changes, page
+    // pool returns) before the system or the GPU suspends.
+    nv_deferred_free_flush();
 
 #if defined(NV_PM_RUNTIME_AVAILABLE) && defined(NV_PM_DOMAIN_AVAILABLE)
     /* Handle GenPD suspend sequence for Tegra PCI iGPU */
