@@ -1631,17 +1631,19 @@ _kgmmuClientShadowFaultBufferPagesAllocate
         return status;
     }
 
-    memdescSetPageSize(pMemDesc, AT_GPU, RM_PAGE_SIZE_HUGE);
+    //
+    // Local change: allocate with the default page size only. Upstream first
+    // tried RM_PAGE_SIZE_HUGE (an order-9 contiguous sysmem block) and fell back
+    // to RM_PAGE_SIZE on NV_ERR_NO_MEMORY (Bug 5042223). That first attempt runs
+    // under the RM API/GPU lock with __GFP_RETRY_MAYFAIL, so on fragmented RAM
+    // the kernel spends seconds in direct reclaim and compaction before it fails,
+    // and every other RM client waits. The buffer is registered with GSP as a
+    // list of RM_PAGE_SIZE PTEs and the CPU uses it through memdescMap, so the
+    // default page size is the same path the upstream fallback already takes.
+    //
+    memdescSetPageSize(pMemDesc, AT_GPU, RM_PAGE_SIZE);
     memdescTagAlloc(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_UNNAMED_TAG_33,
                     pMemDesc);
-
-    // TODO: Bug 5042223
-    if (status == NV_ERR_NO_MEMORY)
-    {
-        NV_PRINTF(LEVEL_ERROR, "Allocation failed with big page size, retrying with default page size\n");
-        memdescSetPageSize(pMemDesc, AT_GPU, RM_PAGE_SIZE);
-        memdescTagAlloc(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_UNNAMED_TAG_33, pMemDesc);
-    }
 
     if (status != NV_OK)
     {
